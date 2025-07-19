@@ -1,3 +1,6 @@
+# to run the app locally, run the following on terminal: 
+# 1) Activate venv: source venv/bin/activate 
+# 2) run: uvicorn main:app --reload
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
 from openai import OpenAI
@@ -18,6 +21,7 @@ async def suggest(ingredients: Ingredients):
     prompt = f"""You are a helpful cooking assistant.
 The user has the following ingredients: {', '.join(ingredients.items)}.
 They also have access to basic seasonings (salt, pepper, oil, etc.) and basic cookware (microwave, stove, oven, blender).
+If the ingredients do not go well together, feel free to leave some of the ingredients out of the recipe.
 Suggest 3 meal ideas they can make, and briefly describe each (1-2 sentences)."""
 
     response = client.chat.completions.create(
