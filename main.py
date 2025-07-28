@@ -1,101 +1,68 @@
 # to run the app locally, run the following on terminal: 
 # 1) Activate venv: source venv/bin/activate 
 # 2) run: uvicorn main:app --reload
-from fastapi import FastAPI, Request
+
+# Grow Wealth Focus Backend (Audit & News)
+from fastapi import FastAPI, Query
 from pydantic import BaseModel
-from openai import OpenAI
+from audit_definitions import audit_definitions
 from dotenv import load_dotenv
 import os
+import random
+import feedparser
 
-load_dotenv()
-api_key = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=api_key)
+
 
 app = FastAPI()
 
-class Ingredients(BaseModel):
-    items: list[str]
-    allow_extra: bool = False
-    detail_for: str = None
+# Static UK audit terms (can be expanded)
+UK_AUDIT_TERMS = [
+    "Materiality", "Substantive Testing", "ISA 315", "ISA 240", "ISA 330", "ISA 700", "ISA 520", "ISA 540", "ISA 570", "ISA 580", "ISA 600", "ISA 610", "ISA 620",
+    "Going Concern", "Audit Risk", "Control Environment", "Sampling", "Engagement Letter", "Audit Opinion", "Assertions", "ICAEW Code of Ethics", "External Confirmation", "Analytical Procedures", "Audit Evidence",
+    "Audit Planning", "Risk Assessment", "Test of Controls", "Substantive Procedures", "Audit Documentation", "Audit Trail", "Professional Skepticism", "Independence", "Ethical Standards", "Audit Committee", "Internal Audit", "External Audit",
+    "Audit File", "Audit Partner", "Audit Manager", "Audit Senior", "Audit Junior", "Audit Findings", "Audit Recommendations", "Audit Follow-up", "Audit Scope", "Audit Methodology", "Audit Standards", "Audit Quality", "Audit Review",
+    "Audit Engagement", "Audit Client", "Audit Fees", "Audit Timetable", "Audit Risks", "Audit Controls", "Audit Testing", "Audit Completion", "Audit Communication", "Audit Working Papers", "Audit Population", "Audit Selection", "Audit Results", "Audit Issues", "Audit Adjustments", "Audit Observation", "Audit Inquiry", "Audit Confirmation", "Audit Inspection", "Audit Analysis", "Audit Techniques", "Audit Tools", "Audit Software", "Audit Automation", "Audit Analytics", "Audit Data", "Audit Reasoning", "Audit Judgment", "Audit Professionalism", "Audit Ethics", "Audit Integrity", "Audit Objectivity"
+]
 
-@app.post("/suggest")
-async def suggest(ingredients: Ingredients):
-    if ingredients.detail_for:
-        # Detailed recipe request
-        prompt = f"""You are a helpful cooking assistant.
-The user wants to cook: {ingredients.detail_for}
-They have the following ingredients: {', '.join(ingredients.items)}.
-They also have access to basic seasonings (salt, pepper, oil, soy sauce, oyster sauce) and basic cookware (microwave, stove, oven, blender).
-Suggest a credible, step-by-step recipe for this dish, drawing from trusted cookbooks and culinary websites. List all ingredients needed (including amounts), then provide clear, numbered instructions for how to make the dish. If the user's ingredients are insufficient, you may suggest minor extras if allow_extra is True, but only if they are commonly available and truly improve the dish. Do not invent obscure or controversial ingredients or steps. Format your response as:
-Ingredients:
-- ingredient 1: amount
-- ingredient 2: amount
-Instructions:
-1. Step one
-2. Step two
-..."""
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=600
-        )
-        # Parse response into ingredients, measures, instructions
-        content = response.choices[0].message.content
-        # Simple parsing
-        ingredients_list = []
-        measures_list = []
-        instructions_list = []
-        in_ingredients = False
-        in_instructions = False
-        import re
-        step_pattern = re.compile(r"^(\d+)\.\s*(.*)")
-        for line in content.splitlines():
-            line = line.strip()
-            if line.lower().startswith("ingredients:"):
-                in_ingredients = True
-                in_instructions = False
-                continue
-            if line.lower().startswith("instructions:"):
-                in_ingredients = False
-                in_instructions = True
-                continue
-            if in_ingredients and line.startswith("-"):
-                # Format: - ingredient: amount
-                parts = line[1:].split(":", 1)
-                if len(parts) == 2:
-                    ingredients_list.append(parts[0].strip())
-                    measures_list.append(parts[1].strip())
-                else:
-                    ingredients_list.append(parts[0].strip())
-                    measures_list.append("")
-            if in_instructions:
-                match = step_pattern.match(line)
-                if match:
-                    instructions_list.append(match.group(2).strip())
-        return {
-            "ingredients": ingredients_list,
-            "measures": measures_list,
-            "instructions": instructions_list
-        }
+class AuditTermRequest(BaseModel):
+    term: str
+
+@app.get("/audit/terms")
+async def get_audit_terms(refresh: bool = Query(False)):
+    """Return 3 random UK audit terms. Use refresh to get a new set."""
+    terms = random.sample(UK_AUDIT_TERMS, k=3)
+    return {"terms": terms}
+
+@app.post("/audit/define")
+async def define_audit_term(req: AuditTermRequest):
+    """Return a memorable, light-hearted, and accurate definition for a UK audit term from local data, plus FRC link."""
+    definition = audit_definitions.get(req.term)
+    base_url = "https://www.frc.org.uk/library/?query="
+    term_query = req.term.replace(" ", "+")
+    frc_url = f"{base_url}{term_query}&topics=auditing"
+    if definition:
+        return {"definition": definition, "frc_link": frc_url}
     else:
-        if ingredients.allow_extra:
-            prompt = f"""You are a helpful cooking assistant.
-The user has the following ingredients: {', '.join(ingredients.items)}.
-They also have access to basic seasonings (salt, pepper, oil, soy sauce, oyster sauce) and basic cookware (microwave, stove, oven, blender).
-If you think the dish would benefit from a minor extra ingredient, you may suggest adding it, but only if it would truly improve the dish and is commonly available. If the provided ingredients do not go well together, leave them out of the recipe. Also leave out any ingredients deemed controversial, offensive, or not suitable for a general audience.
-Suggest 3 meal ideas they can make, and briefly describe each (1-2 sentences). Draw inspiration from credible sources like cookbooks, culinary websites, do not invent unusual or obscure dishes and combinations of ingredients."""
-        else:
-            prompt = f"""You are a helpful cooking assistant.
-The user has the following ingredients: {', '.join(ingredients.items)}.
-They also have access to basic seasonings (salt, pepper, oil, soy sauce, oyster sauce) and basic cookware (microwave, stove, oven, blender).
-Do NOT suggest any ingredients beyond those provided and the basic seasonings/cookware. If the provided ingredients do not go well together, leave them out of the recipe. Also leave out any ingredients deemed controversial, offensive, or not suitable for a general audience.
-Suggest 3 meal ideas they can make, and briefly describe each (1-2 sentences). Draw inspiration from credible sources like cookbooks, culinary websites, do not invent unusual or obscure dishes and combinations of ingredients."""
+        return {"definition": "No definition found for this term.", "frc_link": frc_url}
 
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=300
-        )
-        return {"suggestions": response.choices[0].message.content}
+@app.get("/audit/news")
+async def get_audit_news():
+    """Return 2 latest news headlines: UK audit and global banking/capital markets."""
+    feeds = [
+        # UK audit news (e.g. Accountancy Daily)
+        "https://www.accountancydaily.co/rss/audit",
+        # Global banking/capital markets (Reuters)
+        "https://www.reuters.com/rssFeed/bankingNews"
+    ]
+    headlines = []
+    for url in feeds:
+        try:
+            d = feedparser.parse(url)
+            if d.entries:
+                headlines.append({
+                    "title": d.entries[0].title,
+                    "link": d.entries[0].link
+                })
+        except Exception:
+            headlines.append({"title": "Error fetching news", "link": url})
+    return {"headlines": headlines}
